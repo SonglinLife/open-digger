@@ -62,6 +62,9 @@ data:
     - :companies/megvii
     - :companies/datacanvas
     - :companies/cloudwise
+    - :companies/stoneatom
+    - :companies/fuzhi
+    - :companies/iqiyi
     - :communities/openmmlab
     - :communities/xlab
     - :communities/mulan
@@ -254,3 +257,4 @@ data:
     - 57479557 # user:attlee-wang
     - 37795442 # user:xgdyp
     - 39022409 # user:zhicheng-ning
+    - 1736354 # user:Yikun

@@ -1,10 +1,15 @@
-import { QueryConfig, 
-        getMergedConfig, 
-        getRepoWhereClauseForClickhouse,
-        getUserWhereClauseForClickhouse,
-        getTimeRangeWhereClauseForClickhouse,
-        getGroupArrayInsertAtClauseForClickhouse,
-        getGroupTimeAndIdClauseForClickhouse} from './basic';
+import {
+  QueryConfig,
+  getMergedConfig,
+  getRepoWhereClauseForClickhouse,
+  getUserWhereClauseForClickhouse,
+  getTimeRangeWhereClauseForClickhouse,
+  getGroupArrayInsertAtClauseForClickhouse,
+  getGroupTimeClauseForClickhouse,
+  getGroupIdClauseForClickhouse,
+  getInnerOrderAndLimit,
+  getOutterOrderAndLimit
+} from './basic';
 import * as clickhouse from '../db/clickhouse';
 
 export const ISSUE_COMMENT_WEIGHT = 1;
@@ -29,22 +34,20 @@ SELECT
 FROM
 (
   SELECT
-    ${getGroupTimeAndIdClauseForClickhouse(config, 'repo')},
+    ${getGroupTimeClauseForClickhouse(config)},
+    ${getGroupIdClauseForClickhouse(config)},
     SUM(openrank) AS openrank
   FROM gh_repo_openrank
   WHERE ${whereClause.join(' AND ')}
   GROUP BY id, time
-  ${config.limitOption === 'each' && config.limit > 0 ? 
-    `${config.order ? `ORDER BY openrank ${config.order}` : ''} LIMIT ${config.limit} BY time` :
-    ''}
+  ${getInnerOrderAndLimit(config, 'openrank')}
 )
 GROUP BY id
-${config.order ? `ORDER BY openrank[-1] ${config.order}` : ''}
-${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : ''}`;
+${getOutterOrderAndLimit(config, 'openrank')}`;
 
   const result: any = await clickhouse.query(sql);
   return result.map(row => {
-    const [ id, name, openrank ] = row;
+    const [id, name, openrank] = row;
     return {
       id,
       name,
@@ -69,29 +72,27 @@ SELECT
 FROM
 (
   SELECT
-    ${getGroupTimeAndIdClauseForClickhouse(config, 'user')},
+    ${getGroupTimeClauseForClickhouse(config)},
+    ${getGroupIdClauseForClickhouse(config, 'user')},
     SUM(openrank) AS openrank
   FROM gh_user_openrank
   WHERE ${whereClause.join(' AND ')}
   GROUP BY id, time
-  ${config.limitOption === 'each' && config.limit > 0 ? 
-    `${config.order ? `ORDER BY openrank ${config.order}` : ''} LIMIT ${config.limit} BY time` :
-    ''}
+  ${getInnerOrderAndLimit(config, 'openrank')}
 )
 GROUP BY id
-${config.order ? `ORDER BY openrank[-1] ${config.order}` : ''}
-${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : ''}`;
+${getOutterOrderAndLimit(config, 'openrank')}`;
 
   const result: any = await clickhouse.query(sql);
   return result.map(row => {
-    const [ id, name, openrank ] = row;
+    const [id, name, openrank] = row;
     return {
       id,
       name,
       openrank,
     }
   });
-  
+
 }
 
 export const basicActivitySqlComponent = `
@@ -105,35 +106,42 @@ export const basicActivitySqlComponent = `
     sqrt(${ISSUE_COMMENT_WEIGHT}*issue_comment + ${OPEN_ISSUE_WEIGHT}*open_issue + ${OPEN_PULL_WEIGHT}*open_pull + ${REVIEW_COMMENT_WEIGHT}*review_comment + ${PULL_MERGED_WEIGHT}*merged_pull) AS activity
 `;
 
-export const getRepoActivity = async (config: QueryConfig) => {
+interface RepoActivityOption {
+  developerDetail: boolean;
+}
+export const getRepoActivity = async (config: QueryConfig<RepoActivityOption>) => {
   config = getMergedConfig(config);
   const whereClauses: string[] = ["type IN ('IssuesEvent', 'IssueCommentEvent', 'PullRequestEvent', 'PullRequestReviewCommentEvent')"]; // specify types to reduce memory usage and calculation
   const repoWhereClause = await getRepoWhereClauseForClickhouse(config);
   if (repoWhereClause) whereClauses.push(repoWhereClause);
   whereClauses.push(getTimeRangeWhereClauseForClickhouse(config));
+  const developerDetail = config.options?.developerDetail;
 
   const sql = `
 SELECT
   id,
   argMax(name, time) AS name,
-  ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'activity' })},
+  ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'activity', value: 'agg_activity' })},
   ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'participants' })},
   ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'issue_comment' })},
   ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'open_issue' })},
   ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'open_pull' })},
   ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'review_comment' })},
   ${getGroupArrayInsertAtClauseForClickhouse(config, { key: 'merged_pull' })}
+  ${developerDetail === true ? ',' + getGroupArrayInsertAtClauseForClickhouse(config, { key: 'details', noPrecision: true, defaultValue: '[]' }) : ''}
 FROM
 (
   SELECT
-    ${getGroupTimeAndIdClauseForClickhouse(config, 'repo', 'month')},
-    ROUND(SUM(activity), 2) AS activity,
+    ${getGroupTimeClauseForClickhouse(config, 'month')},
+    ${getGroupIdClauseForClickhouse(config, 'repo', 'month')},
+    ROUND(SUM(activity), 2) AS agg_activity,
     COUNT(actor_id) AS participants,
     SUM(issue_comment) AS issue_comment,
     SUM(open_issue) AS open_issue,
     SUM(open_pull) AS open_pull,
     SUM(review_comment) AS review_comment,
     SUM(merged_pull) AS merged_pull
+    ${developerDetail === true ? ',arraySort(x -> -tupleElement(x, 2), groupArray((actor_login, ROUND(activity, 2)))) AS details' : ''}
   FROM
   (
     SELECT
@@ -147,17 +155,14 @@ FROM
     HAVING activity > 0
   )
   GROUP BY id, time
-  ${config.limitOption === 'each' && config.limit > 0 ? 
-    `${config.order ? `ORDER BY activity ${config.order}` : ''} LIMIT ${config.limit} BY time` :
-    ''}
+  ${getInnerOrderAndLimit(config, 'agg_activity')}
 )
 GROUP BY id
-${config.order ? `ORDER BY activity[-1] ${config.order}` : ''}
-${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : ''}`;
+${getOutterOrderAndLimit(config, 'activity')}`;
 
   const result: any = await clickhouse.query(sql);
   return result.map(row => {
-    const [ id, name, activity, participants, issue_comment, open_issue, open_pull, review_comment, merged_pull ] = row;
+    const [id, name, activity, participants, issue_comment, open_issue, open_pull, review_comment, merged_pull, details] = row;
     return {
       id,
       name,
@@ -168,6 +173,7 @@ ${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : '
       open_pull,
       review_comment,
       merged_pull,
+      details,
     }
   });
 }
@@ -192,7 +198,8 @@ SELECT
 FROM
 (
   SELECT
-    ${getGroupTimeAndIdClauseForClickhouse(config, 'actor', 'month')},
+    ${getGroupTimeClauseForClickhouse(config, 'month')},
+    ${getGroupIdClauseForClickhouse(config, 'user')},
     ROUND(SUM(activity), 2) AS activity,
     SUM(issue_comment) AS issue_comment,
     SUM(open_issue) AS open_issue,
@@ -208,20 +215,17 @@ FROM
     FROM gh_events
     WHERE ${whereClauses.join(' AND ')}
     GROUP BY repo_id, actor_id, month
-    HAVING activity > 0 ${ withBot ? '' : `AND actor_login NOT LIKE '%[bot]'` }
+    HAVING activity > 0 ${withBot ? '' : `AND actor_login NOT LIKE '%[bot]'`}
   )
   GROUP BY id, time
-  ${config.limitOption === 'each' && config.limit > 0 ? 
-    `${config.order ? `ORDER BY activity ${config.order}` : ''} LIMIT ${config.limit} BY time` :
-    ''}
+  ${getInnerOrderAndLimit(config, 'activity')}
 )
 GROUP BY id
-${config.order ? `ORDER BY activity[-1] ${config.order}` : ''}
-${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : ''}`;
+${getOutterOrderAndLimit(config, 'activity')}`;
 
   const result: any = await clickhouse.query(sql);
   return result.map(row => {
-    const [ id, name, activity, issue_comment, open_issue, open_pull, review_comment, merged_pull ] = row;
+    const [id, name, activity, issue_comment, open_issue, open_pull, review_comment, merged_pull] = row;
     return {
       id,
       name,
@@ -242,7 +246,7 @@ export const getAttention = async (config: QueryConfig) => {
   if (repoWhereClause) whereClauses.push(repoWhereClause);
   whereClauses.push(getTimeRangeWhereClauseForClickhouse(config));
 
-    const sql = `
+  const sql = `
 SELECT
   id,
   argMax(name, time) AS name,
@@ -250,24 +254,22 @@ SELECT
 FROM
 (
   SELECT
-    ${getGroupTimeAndIdClauseForClickhouse(config)},
+    ${getGroupTimeClauseForClickhouse(config)},
+    ${getGroupIdClauseForClickhouse(config)},
     countIf(type='WatchEvent') AS stars,
     countIf(type='ForkEvent') AS forks,
     stars + 2 * forks AS attention
   FROM gh_events
   WHERE ${whereClauses.join(' AND ')}
   GROUP BY id, time
-  ${config.limitOption === 'each' && config.limit > 0 ? 
-    `${config.order ? `ORDER BY attention ${config.order}` : ''} LIMIT ${config.limit} BY time` :
-    ''}
+  ${getInnerOrderAndLimit(config, 'attention')}
 )
 GROUP BY id
-${config.order ? `ORDER BY attention[-1] ${config.order}` : ''}
-${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : ''}`;
+${getOutterOrderAndLimit(config, 'attention')}`;
 
   const result: any = await clickhouse.query(sql);
   return result.map(row => {
-    const [ id, name, attention ] = row;
+    const [id, name, attention] = row;
     return {
       id,
       name,

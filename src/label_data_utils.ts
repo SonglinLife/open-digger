@@ -6,7 +6,7 @@ const labelInputDir = '../labeled_data';
 const labelInputPath = path.join(__dirname, labelInputDir);
 
 const supportedTypes = new Set<string>([
-  'Region', 'Company', 'Community', 'Project', 'Foundation', 'Tech-0', 'Tech-1', 'Tech-2'
+  'Region', 'Company', 'Community', 'Project', 'Foundation', 'Tech-0', 'Tech-1', 'Tech-2', 'Domain-0', 'Bot'
 ]);
 
 const supportedKey = new Set<string>([
@@ -96,13 +96,13 @@ function processLabelItems(map: Map<string, LabelItem>): ParsedLabelItem[] {
 function parseItem(item: LabelItem, map: Map<string, LabelItem>) {
   if (item.parsed) return;
   if (item.content.type && !supportedTypes.has(item.content.type)) {
-      throw new Error(`Not supported type ${item.content.type}`)
-    }
+    throw new Error(`Not supported type ${item.content.type}`)
+  }
   for (const key in item.content.data) {
     if (!supportedKey.has(key)) {
       throw new Error(`Not supported element=${key}, identifier=${item.identifier}`);
     }
-    switch(key) {
+    switch (key) {
       case 'github_repo':
         item.githubRepos.push(...item.content.data[key]);
         break;

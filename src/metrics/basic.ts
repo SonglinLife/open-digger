@@ -17,6 +17,7 @@ export interface QueryConfig<T = any> {
   endYear: number;
   endMonth: number;
   order?: 'DESC' | 'ASC';
+  orderOption?: 'latest' | 'total',
   limit: number;
   limitOption: 'each' | 'all';
   precision: number;
@@ -28,16 +29,29 @@ export interface QueryConfig<T = any> {
 
 export const getMergedConfig = (config: any): QueryConfig => {
   const defaultConfig: QueryConfig = {
-      startYear: 2015,
-      startMonth: 1,
-      endYear: new Date().getFullYear(),
-      endMonth: new Date().getMonth(),
-      limit: 10,
-      limitOption: 'all',
-      precision: 2,
+    startYear: 2015,
+    startMonth: 1,
+    endYear: new Date().getFullYear(),
+    endMonth: new Date().getMonth(),
+    orderOption: 'latest',
+    limit: 10,
+    limitOption: 'all',
+    precision: 2,
   };
   return merge(defaultConfig, config);
 }
+
+export interface TimeDurationOption {
+  unit: 'week' | 'day' | 'hour' | 'minute';
+  thresholds: number[];
+  sortBy: 'avg' | 'levels' | 'quantile_0' | 'quantile_1' | 'quantile_2' | 'quantile_3' | 'quantile_4'
+}
+
+export const timeDurationConstants = {
+  unitArray: ['week', 'day', 'hour', 'minute'],
+  sortByArray: ['avg', 'levels', 'quantile_0', 'quantile_1', 'quantile_2', 'quantile_3', 'quantile_4'],
+  quantileArray: [...Array(5).keys()],
+};
 
 export const forEveryMonthByConfig = async (config: QueryConfig, func: (y: number, m: number) => Promise<any>) => {
   return forEveryMonth(config.startYear, config.startMonth, config.endYear, config.endMonth, func);
@@ -46,7 +60,7 @@ export const forEveryMonthByConfig = async (config: QueryConfig, func: (y: numbe
 export const forEveryMonth = async (startYear: number, startMonth: number, endYear: number, endMonth: number, func: (y: number, m: number) => Promise<any>) => {
   for (let y = startYear; y <= endYear; y++) {
     for (let m = (y === startYear ? startMonth : 1);
-              m <= (y === endYear ? endMonth : 12); m++) {
+      m <= (y === endYear ? endMonth : 12); m++) {
       await func(y, m);
     }
   }
@@ -225,32 +239,30 @@ export const getTimeRangeSumClauseForNeo4j = async (config: QueryConfig, type: s
 }
 
 export const getTimeRangeWhereClauseForClickhouse = (config: QueryConfig): string => {
-  const endDate = new Date(`${config.endYear}-${config.endMonth}-1`);
-  endDate.setMonth(config.endMonth);  // find next month
-  return ` created_at >= toDate('${config.startYear}-${config.startMonth}-1') AND created_at < toDate('${endDate.getFullYear()}-${endDate.getMonth() + 1}-1') `;
+  return ` created_at >= toDate('${config.startYear}-${config.startMonth}-1') AND created_at < dateAdd(month, 1, toDate('${config.endYear}-${config.endMonth}-1'))`;
 }
 
 // clickhouse label group condition
-export const getLabelGroupConditionClauseForClickhouse = (config: QueryConfig): string => {
+export const getLabelGroupConditionClauseForClickhouse = (config: QueryConfig, timeCol?: string): string => {
   const labelData = getLabelData(config.injectLabelData)?.filter(l => l.type === config.groupBy);
   if (!labelData || labelData.length === 0) throw new Error(`Invalide group by label: ${config.groupBy}`);
-  const idLabelRepoMap = new Map<number, string[]>();
-  const idLabelOrgMap = new Map<number, string[]>();
-  const idLabelUserMap = new Map<number, string[]>();
-  const addToMap = (map: Map<number, string[]>, id: number, label: string) => {
+  const idLabelRepoMap = new Map<number, string[][]>();
+  const idLabelOrgMap = new Map<number, string[][]>();
+  const idLabelUserMap = new Map<number, string[][]>();
+  const addToMap = (map: Map<number, string[][]>, id: number, label: string[]) => {
     if (!map.has(id)) map.set(id, []);
     map.get(id)!.push(label);
   };
 
   labelData.forEach(l => {
-    l.githubOrgs.forEach(id => addToMap(idLabelOrgMap, id, l.name));
-    l.githubRepos.forEach(id => addToMap(idLabelRepoMap, id, l.name));
-    l.githubUsers.forEach(id => addToMap(idLabelUserMap, id, l.name));
+    l.githubOrgs.forEach(id => addToMap(idLabelOrgMap, id, [l.identifier, l.name]));
+    l.githubRepos.forEach(id => addToMap(idLabelRepoMap, id, [l.identifier, l.name]));
+    l.githubUsers.forEach(id => addToMap(idLabelUserMap, id, [l.identifier, l.name]));
   });
 
-  const resultMap = new Map<string, { labels: string[], repoIds: number[], orgIds: number[], userIds: number[] }>();
-  const addToResultMap = (map: Map<string, { labels: string[], repoIds: number[], orgIds: number[], userIds: number[] }>, id: number, labels: string[], type: 'repo' | 'org' | 'user') => {
-    const key = labels.toString();
+  const resultMap = new Map<string, { labels: string[][], repoIds: number[], orgIds: number[], userIds: number[] }>();
+  const addToResultMap = (map: Map<string, { labels: string[][], repoIds: number[], orgIds: number[], userIds: number[] }>, id: number, labels: string[][], type: 'repo' | 'org' | 'user') => {
+    const key = labels[0].toString();
     if (!map.has(key)) map.set(key, { labels, repoIds: [], orgIds: [], userIds: [] });
     if (type === 'repo') map.get(key)!.repoIds.push(id);
     else if (type === 'org') map.get(key)!.orgIds.push(id);
@@ -260,50 +272,91 @@ export const getLabelGroupConditionClauseForClickhouse = (config: QueryConfig): 
   idLabelOrgMap.forEach((labels, id) => addToResultMap(resultMap, id, labels, 'org'));
   idLabelUserMap.forEach((labels, id) => addToResultMap(resultMap, id, labels, 'user'));
 
-  const conditions = Array.from(resultMap.values()).map(v => {
+  const idConditions = Array.from(resultMap.values()).map(v => {
     const c: string[] = [];
     if (v.orgIds.length > 0) c.push(`org_id IN (${v.orgIds.join(',')})`);
     if (v.repoIds.length > 0) c.push(`repo_id IN (${v.repoIds.join(',')})`);
     if (v.userIds.length > 0) c.push(`actor_id IN (${v.userIds.join(',')})`);
-    return `(${c.join(' OR ')}),[${v.labels.map(l => `'${l}'`).join(',')}]`;
+    return `(${c.join(' OR ')}),[${v.labels.map(l => `'${l[0]}'`).join(',')}]`;
   }).join(',');
 
-  return `arrayJoin(multiIf(${conditions}, ['Others']))`;
+  const nameConditions = Array.from(resultMap.values()).map(v => {
+    const c: string[] = [];
+    if (v.orgIds.length > 0) c.push(`org_id IN (${v.orgIds.join(',')})`);
+    if (v.repoIds.length > 0) c.push(`repo_id IN (${v.repoIds.join(',')})`);
+    if (v.userIds.length > 0) c.push(`actor_id IN (${v.userIds.join(',')})`);
+    return `(${c.join(' OR ')}),[${v.labels.map(l => `'${l[1]}'`).join(',')}]`;
+  }).join(',');
+
+  return `arrayJoin(multiIf(${idConditions}, ['Others'])) AS id, argMax(arrayJoin(multiIf(${nameConditions}, ['Others'])), ${timeCol ?? 'time'}) AS name`;
 }
 
-export const getGroupArrayInsertAtClauseForClickhouse = (config: QueryConfig, option: { key: string; defaultValue?: string; value?: string; noPrecision?: boolean }): string => {
-  return `groupArrayInsertAt${ option.defaultValue ? `(${option.defaultValue})` : '' }(${ (() => {
-    const name = option.value ? option.value : option.key;
-    if (config.precision > 0 && !option.noPrecision) return `ROUND(${name}, ${config.precision})`;
-    return name;
-  })() }, ${(() => {
-    if (!config.groupTimeRange) return '0';
-    let startTime = `toDate('${config.startYear}-${config.startMonth}-1')`;
-    if (config.groupTimeRange === 'quarter') startTime = `toStartOfQuarter(${startTime})`;
-    else if (config.groupTimeRange === 'year') startTime = `toStartOfYear(${startTime})`;
-    return `toUInt32(dateDiff('${config.groupTimeRange}', ${startTime}, time))`;
-  })()}) AS ${option.key}`
+export const getGroupArrayInsertAtClauseForClickhouse = (config: QueryConfig, option: { key: string; defaultValue?: string; value?: string; noPrecision?: boolean, positionByEndTime?: boolean }): string => {
+  let startTime = `toDate('${config.startYear}-${config.startMonth}-1')`;
+  let endTime = `toDate('${config.endYear}-${config.endMonth}-1')`;
+  return `groupArrayInsertAt(
+    ${option.defaultValue ?? 0  // default value
+    },
+    ${(() => {
+      // total length
+      if (config.groupTimeRange) {
+        return `toUInt32(dateDiff('${config.groupTimeRange}', ${startTime}, ${endTime})) + 1)`;
+      } else {
+        return '1)';
+      }
+    })()}(${(() => {
+      // group key
+      const name = option.value ? option.value : option.key;
+      if (config.precision > 0 && !option.noPrecision) return `ROUND(${name}, ${config.precision})`;
+      return name;
+    })()},
+    ${(() => {
+      // position
+      if (!config.groupTimeRange) return '0';
+      if (config.groupTimeRange === 'quarter') startTime = `toStartOfQuarter(${startTime})`;
+      else if (config.groupTimeRange === 'year') startTime = `toStartOfYear(${startTime})`;
+      return `toUInt32(dateDiff('${config.groupTimeRange}', ${startTime}, time)${option.positionByEndTime ? '-1' : ''})`;
+    })()}) AS ${option.key}`
 }
 
-export const getGroupTimeAndIdClauseForClickhouse = (config: QueryConfig, type: string = 'repo', timeCol: string = 'created_at'): string => {
+export const getGroupTimeClauseForClickhouse = (config: QueryConfig, timeCol: string = 'created_at'): string => {
   return `${(() => {
-    let groupEle = '1'; // no time range, aggregate all data to a single value
+    let groupEle = `dateAdd(month, 1, toDate('${config.endYear}-${config.endMonth}-1'))`; // no time range, aggregate all data to a single value, use next month of end time to make sure time compare works.
     if (config.groupTimeRange === 'month') groupEle = `toStartOfMonth(${timeCol})`;
     else if (config.groupTimeRange === 'quarter') groupEle = `toStartOfQuarter(${timeCol})`;
     else if (config.groupTimeRange === 'year') groupEle = `toStartOfYear(${timeCol})`;
     return groupEle;
-  })()} AS time, ${(() => {
+  })()} AS time`;
+}
+
+export const getGroupIdClauseForClickhouse = (config: QueryConfig, type: string = 'repo', timeCol?: string) => {
+  return `${(() => {
+    const timeColumn = timeCol ?? (config.groupTimeRange ? 'time' : 'created_at');
     if (!config.groupBy) {  // group by repo'
       if (type === 'repo')
-        return 'repo_id AS id, argMax(repo_name, time) AS name';
+        return `repo_id AS id, argMax(repo_name, ${timeColumn}) AS name`;
       else
-        return `actor_id AS id, argMax(actor_login, time) AS name`;
+        return `actor_id AS id, argMax(actor_login, ${timeColumn}) AS name`;
     } else if (config.groupBy === 'org') {
-      return `org_id AS id, argMax(org_login, time) AS name`;
+      return `org_id AS id, argMax(org_login, ${timeColumn}) AS name`;
     } else {  // group by label
-      return `${getLabelGroupConditionClauseForClickhouse(config)} AS id, id AS name`;
+      return getLabelGroupConditionClauseForClickhouse(config, timeColumn);
     }
   })()}`;
+}
+
+export const getInnerOrderAndLimit = (config: QueryConfig, col: string, index?: number) => {
+  return `${config.limitOption === 'each' && config.limit > 0 ?
+    `${config.order ? `ORDER BY ${col}${index !== undefined ? `[${index}]` : ''} ${config.order}` : ''} LIMIT ${config.limit} BY time` :
+    ''}`
+}
+
+export const getOutterOrderAndLimit = (config: QueryConfig, col: string, index?: number) => {
+  return `${config.order ? `ORDER BY ${config.orderOption === 'latest'
+    ? `${col}[-1]${index !== undefined ? `[${index}]` : ''}`
+    : `arraySum(${index !== undefined ? `x -> x[${index}],` : ''}${col})`
+    } ${config.order}` : ''}
+    ${config.limitOption === 'all' && config.limit > 0 ? `LIMIT ${config.limit}` : ''}`;
 }
 
 export const filterEnumType = (value: any, types: string[], defautlValue: string): string => {
