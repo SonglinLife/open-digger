@@ -1,5 +1,5 @@
 name: TAOS Data
 type: Company
 data:
-  github_org:
-    - 48876650 # org:taosdata
+  labels:
+    - tdengine

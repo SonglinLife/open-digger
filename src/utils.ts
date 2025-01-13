@@ -1,6 +1,8 @@
-import { existsSync, readFileSync } from 'fs';
+import { createReadStream, existsSync, readFileSync } from 'fs';
 import { load } from 'js-yaml';
 import pWaitFor from 'p-wait-for';
+const dateformat = require('dateformat');
+const CsvReadableStream = require('csv-reader');
 
 export function readFileAsObj(path: string) {
   if (!existsSync(path)) {
@@ -26,6 +28,21 @@ export function readFileAsObj(path: string) {
   }
   return null;
 }
+
+export async function readCsvLine(path: string, online: (row: string[]) => any): Promise<void> {
+  return new Promise(resolve => {
+    const inputStream = createReadStream(path, 'utf-8');
+    inputStream
+      .pipe(new CsvReadableStream({ trim: true, skipHeader: true }))
+      .on('data', (row: string[]) => {
+        online(row);
+      })
+      .on('end', () => {
+        resolve();
+      });
+  });
+}
+
 
 export async function waitFor(mill: number): Promise<void> {
   return new Promise(resolve => {
@@ -73,4 +90,54 @@ export function rankData<T = any>(data: T[], iterArr: any[], getter: (item: T, i
     result.set(iterItem, iterResult);
   }
   return result;
+}
+
+export const getLogger = (tag: string) => {
+  const log = (level: string, ...args: any[]) =>
+    console.log(`${dateformat(new Date(), 'yyyy-mm-dd HH:MM:ss')} ${level} [${tag}]`, ...args);
+  return {
+    info: (...args: any[]) => log('INFO', ...args),
+    warn: (...args: any[]) => log('WARN', ...args),
+    error: (...args: any[]) => log('ERROR', ...args),
+  };
+};
+
+export class ArrayMap<T> {
+  private array: T[];
+  private map: Map<any, number>;
+  private keyGetter: (item: T) => any;
+
+  constructor(arr: T[], keyGetter?: (item: T) => any) {
+    this.array = [];
+    this.map = new Map();
+    this.keyGetter = keyGetter ?? (i => i);
+    arr.forEach(i => this.add(i));
+  }
+
+  public get length() {
+    return this.array.length;
+  }
+
+  public get(key: any): T | undefined {
+    const index = this.map.get(key);
+    return index === undefined ? undefined : this.array[index];
+  }
+
+  public getIndex(key: any): number {
+    return this.map.get(key) ?? -1;
+  }
+
+  public add(item: T) {
+    const key = this.keyGetter(item);
+    if (this.map.has(key)) {
+      this.array[this.map.get(key)!] = item;
+    } else {
+      this.map.set(key, this.array.length);
+      this.array.push(item);
+    }
+  }
+
+  public getArray(): T[] {
+    return [...this.array];
+  }
 }

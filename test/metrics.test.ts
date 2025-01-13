@@ -32,7 +32,7 @@ async function validateData(
       console.log("query result data: ", JSON.stringify(queryResultDataWithoutDetail));
     }
     assert(equal);
-  } 
+  }
   else {
     console.log(`File ${fileName} not found, because the option is not supported.`);
   }
@@ -48,12 +48,7 @@ function removeFields(data: any) {
 
     for (const key in data) {
       if (
-        !key.startsWith("quantile_") &&
-        !key.startsWith("detail") &&
-        !key.startsWith("avg") &&
-        !key.startsWith("levels") &&
-        !key.startsWith("openrank")
-      ) {
+        !['quantile_', 'detail', 'repos', 'orgs', 'developers', 'avg', 'levels', 'openrank', 'platform'].some(k => key.startsWith(k))) {
         newData[key] = removeFields(data[key]);
       }
     }
@@ -71,7 +66,7 @@ const groupTimeRangeOptions = ["year", "quarter", "month"];
 const groupByOptions = [null, "org"];
 
 
-describe("Data tests", () => {
+describe("Metrics tests", () => {
   before(function () {
     this.timeout(100000);
   });
@@ -248,6 +243,15 @@ describe("Data tests", () => {
                   openDigger.chaossInactiveContributors,
                   "inactive_contributors",
                   inactive_contributors_file_name
+                );
+              });
+              it("should test contributors interface", async () => {
+                const contributors_file_name =
+                  `contributors_${order}_${limit}_${limitOption}_${groupBy}_${groupTimeRange}`.toLowerCase();
+                await validateData(
+                  openDigger.chaossContributors,
+                  "contributors",
+                  contributors_file_name
                 );
               });
               it("should test changeRequestsAcceptanceRatio interface", async () => {

@@ -1,5 +1,13 @@
 name: RedHat
 type: Company
 data:
-  github_org:
-    - 33972111 # org:RedHatOfficial
+  labels:
+    - ceph
+    - openshift
+    - stackrox
+  platforms:
+    - name: GitHub
+      type: Code Hosting
+      orgs:
+        - id: 33972111
+          name: RedHatOfficial

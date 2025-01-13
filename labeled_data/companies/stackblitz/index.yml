@@ -1,0 +1,12 @@
+name: StackBlitz
+type: Company
+data:
+  labels:
+    - bolt.new
+    - webcontainer
+  platforms:
+    - name: GitHub
+      type: Code Hosting
+      orgs:
+        - id: 28635252
+          name: stackblitz

@@ -1,5 +1,5 @@
 name: Singapore
-type: Region
+type: Region-0
 data:
-  label:
-    - :companies/cloudwise
+  labels:
+    - ':companies/cloudwise'

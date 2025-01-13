@@ -1,8 +1,9 @@
 name: Database
 type: Tech-0
 data:
-  label:
+  labels:
     - array
+    - columnar
     - content
     - document
     - event

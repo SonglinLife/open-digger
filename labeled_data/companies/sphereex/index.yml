@@ -1,5 +1,11 @@
 name: SphereEx
 type: Company
 data:
-  github_repo:
-    - 49876476 # repo:apache/shardingsphere
+  labels:
+    - shardingsphere
+  platforms:
+    - name: GitHub
+      type: Code Hosting
+      orgs:
+        - id: 83386009
+          name: SphereEx

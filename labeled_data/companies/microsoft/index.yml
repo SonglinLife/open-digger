@@ -1,10 +1,21 @@
 name: Microsoft
 type: Company
 data:
-  github_org:
-    - 6154722 # org:microsoft
-    - 9141961 # org:dotnet
-    - 27453006 # org:dotnet-architecture
-    - 11524380 # org:PowerShell
-    - 27173223 # org:interpretml
-    - 6844498 # org:Azure
+  labels:
+    - azure
+    - dotnet
+    - fluentui
+    - fluid_framework
+    - interpretml
+    - onnxruntime
+    - playwright
+    - power_toys
+    - powershell
+    - vcpkg
+    - vscode
+  platforms:
+    - name: GitHub
+      type: Code Hosting
+      orgs:
+        - id: 6154722
+          name: microsoft

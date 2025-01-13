@@ -1,5 +1,11 @@
 name: HashiCorp
 type: Company
 data:
-  github_org:
-    - 761456 # org:hashicorp
+  labels:
+    - vault
+  platforms:
+    - name: GitHub
+      type: Code Hosting
+      orgs:
+        - id: 761456
+          name: hashicorp

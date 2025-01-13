@@ -1,52 +1,47 @@
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import cron from 'node-cron';
+import { getLogger } from '../utils';
+import getConfig from '../config';
 
 export interface Task {
   cron: string;
-  enable: boolean;
-  immediate: boolean;
-  callback: (date: Date) => Promise<void>;
+  callback: (date: Date | 'manual' | 'init') => Promise<void>;
 }
 
 (async () => {
+  const logger = getLogger('TaskRunner');
+  const config = await getConfig();
+
   const taskDir = join(__dirname, './tasks');
   if (!existsSync(taskDir)) {
-    console.log('Task dir not exists.');
+    logger.info('Task dir not exists.');
     return;
   }
 
+  const enableTasks = new Set<string>(config.task.enable);
+  const immediateTasks = new Set<string>(config.task.immediate);
+
   const taskFiles = readdirSync(taskDir);
   taskFiles.forEach(async taskFile => {
-    const p = join(taskDir, taskFile);
-    const task: Task = await import(p);
+    const task: Task = await import(join(taskDir, taskFile));
     if (!task.cron || !task.callback) {
-      console.log(`Task in ${taskFile} is not a valid task.`);
+      logger.error(`Task in ${taskFile} is invalid.`);
       return;
     }
-    if (task.enable) {
-      console.log(`Enable task: ${taskFile}`);
-      cron.schedule(task.cron, t => {
-        return new Promise<void>(async resolve => {
-          try {
-            console.log(`Start to run task for ${taskFile}`);
-            await task.callback(t);
-            console.log(`Task ${taskFile} finished.`);
-          } catch (e) {
-            console.log(e);
-          }
-          resolve();
-        });
-      });
-      if (task.immediate) {
+    const taskName = taskFile.slice(0, -3); // remove suffix
+    if (enableTasks.has(taskName)) {
+      logger.info(`Enable task: ${taskName}`);
+      cron.schedule(task.cron, t => new Promise<void>(async resolve => {
         try {
-          console.log(`Start to run task for ${taskFile}`);
-          await task.callback(new Date());
-          console.log(`Task ${taskFile} finished.`);
+          logger.info(`Start to run task: ${taskName}`);
+          await task.callback(t);
+          logger.info(`Task ${taskName} finished.`);
         } catch (e) {
-          console.log(e);
+          logger.error(`Error on running ${taskName}, e=${e}`);
         }
-      }
+        resolve();
+      }), { runOnInit: immediateTasks.has(taskName) });
     }
   });
 })();

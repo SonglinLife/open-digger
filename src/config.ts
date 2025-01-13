@@ -16,7 +16,7 @@ let config = {
       database: process.env.CLICKHOUSE_DATABASE ?? 'opensource',
     },
     neo4j: {
-      host: process.env.NEO4J_HOST ?? 'neo4j://localhost',
+      url: process.env.NEO4J_HOST ?? 'neo4j://localhost',
     }
   },
   oss: {
@@ -36,11 +36,17 @@ let config = {
   },
   github: {
     tokens: [],
+    appPrivateKeyPath: '',
+    appId: 0,
   },
   google: {
     map: {
       key: '',
     },
+  },
+  task: {
+    enable: [],
+    immediate: [],
   },
 };
 

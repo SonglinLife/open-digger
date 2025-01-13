@@ -9,14 +9,16 @@ config = {
     'clickhouse': {
       'host': 'localhost', #python里的clickhouse_driver用的tcp端口9000
       'port': '9000',
-      'user': '',
+      'user': 'default',
       'password': '',
       'protocol': 'http:',
       'format': 'JSON',
       'database': 'opensource',
     },
     'neo4j': {
-      'host':'neo4j://localhost:7687',
+      'host': 'neo4j://localhost:7687',
+      'user': 'neo4j',
+      'password': 'password',
     }
   },
   'oss': {
@@ -33,10 +35,10 @@ config = {
 }
 def mergeConfig(base_config, local_config):
     for key, val in local_config.items():
-            if isinstance(val, dict):
-                mergeConfig(base_config[key], val)
-            else:
-                base_config[key] = val
+        if isinstance(val, dict):
+            mergeConfig(base_config[key], val)
+        else:
+            base_config[key] = val
     return base_config
 def getConfig():
     global config
