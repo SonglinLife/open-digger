@@ -47,7 +47,7 @@
     "https-proxy-agent": "^7.0.6",
     "ijavascript-plotly": "0.0.1",
     "js-yaml": "^4.1.0",
-    "lodash": "^4.17.21",
+    "lodash": "^4.17.23",
     "neo4j-driver": "^4.4.11",
     "node-cron": "^3.0.0",
     "node-worker-threads-pool": "^1.5.1",
